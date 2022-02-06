@@ -105,9 +105,7 @@ async def prepare_backtest_config(args) -> dict:
         raise Exception("error: using the ~ to indicate the user's home directory is not supported")
 
     base_dirpath = os.path.join(
-        config["base_dir"],
-        f"{config['exchange']}{'_spot' if 'spot' in config['market_type'] else ''}",
-        config["symbol"],
+        config["base_dir"], f"{config['exchange']}{'_spot' if 'spot' in config['market_type'] else ''}", config["symbol"],
     )
     config["caches_dirpath"] = make_get_filepath(os.path.join(base_dirpath, "caches", ""))
     config["optimize_dirpath"] = make_get_filepath(os.path.join(base_dirpath, "optimize", ""))
@@ -214,6 +212,12 @@ async def fetch_market_specific_settings(config: dict):
         settings_from_exchange["maker_fee"] = -0.00025
         settings_from_exchange["taker_fee"] = 0.00075
         settings_from_exchange["exchange"] = "bybit"
+    elif exchange == "binance_us":
+        bot = await create_binance_bot_us(tmp_live_settings)
+        settings_from_exchange["maker_fee"] = 0.001
+        settings_from_exchange["taker_fee"] = 0.001
+        settings_from_exchange["spot"] = True
+        settings_from_exchange["hedge_mode"] = False
     else:
         raise Exception(f"unknown exchange {exchange}")
     await bot.session.close()
@@ -249,6 +253,14 @@ async def create_binance_bot_spot(config: dict):
     from binance_spot import BinanceBotSpot
 
     bot = BinanceBotSpot(config)
+    await bot._init()
+    return bot
+
+
+async def create_binance_bot_us(config: dict):
+    from binance_us import BinanceBotUS
+
+    bot = BinanceBotUS(config)
     await bot._init()
     return bot
 
@@ -355,11 +367,7 @@ def make_tick_samples(config: dict, sec_span: int = 1):
     start_ts = date_to_ts(config["start_date"])
     end_ts = date_to_ts(config["end_date"])
     ticks_filepath = os.path.join(
-        "historical_data",
-        config["exchange"],
-        f"agg_trades_{'spot' if config['spot'] else 'futures'}",
-        config["symbol"],
-        "",
+        "historical_data", config["exchange"], f"agg_trades_{'spot' if config['spot'] else 'futures'}", config["symbol"], "",
     )
     if not os.path.exists(ticks_filepath):
         return
@@ -376,9 +384,7 @@ def make_tick_samples(config: dict, sec_span: int = 1):
         ticks = np.concatenate((ticks, tdf[["timestamp", "qty", "price"]].values))
         del tdf
     samples = calc_samples(ticks[ticks[:, 0].argsort()], sec_span * 1000)
-    print(
-        f"took {time() - sts:.2f} seconds to load {len(ticks)} ticks, creating {len(samples)} samples"
-    )
+    print(f"took {time() - sts:.2f} seconds to load {len(ticks)} ticks, creating {len(samples)} samples")
     del ticks
     return samples
 
@@ -389,8 +395,7 @@ def get_starting_configs(config) -> [dict]:
         try:
             if os.path.isdir(config["starting_configs"]):
                 starting_configs = [
-                    json.load(open(f))
-                    for f in glob.glob(os.path.join(config["starting_configs"], "*.json"))
+                    json.load(open(f)) for f in glob.glob(os.path.join(config["starting_configs"], "*.json"))
                 ]
                 print("Starting with all configurations in directory.")
             else:

@@ -1100,6 +1100,10 @@ async def main() -> None:
         from procedures import create_bybit_bot
 
         bot = await create_bybit_bot(config)
+    elif account["exchange"] == "binance_us":
+        from procedures import create_binance_bot_us
+
+        bot = await create_binance_bot_us(config)
     else:
         raise Exception("unknown exchange", account["exchange"])
 
