@@ -186,13 +186,13 @@ class BinanceBot(Bot):
                     self.min_cost = self.config["min_cost"] = 0.0
                 break
 
-        self.max_leverage = self.config["max_leverage"] = 25
+        self.max_leverage = self.config["max_leverage"] = 50
         await super()._init()
         await self.init_order_book()
         await self.update_position()
 
     async def execute_leverage_change(self):
-        lev = 7  # arbitrary
+        lev = 15  # arbitrary
         return await self.private_post(
             self.endpoints["leverage"], {"symbol": self.symbol, "leverage": lev}
         )
