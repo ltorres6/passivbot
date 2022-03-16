@@ -12,7 +12,7 @@ import numpy as np
 from njit_funcs import (
     round_dn,
     round_up,
-    calc_long_pnl,
+    calc_pnl_long,
     calc_min_entry_qty,
     qty_to_cost,
     calc_upnl,
@@ -23,7 +23,7 @@ from procedures import print_, print_async_exception
 from pure_funcs import (
     ts_to_date,
     sort_dict_keys,
-    calc_long_pprice,
+    calc_pprice_long,
     format_float,
     get_position_fills,
     spotify_config,
@@ -242,20 +242,20 @@ class BinanceBotSpot(Bot):
         balance = {'BTC': {'free': float, 'locked': float, 'onhand': float}, ...}
         long_pfills = [{order...}, ...]
         """
-        long_psize = round_dn(balance[self.coin]["onhand"], self.qty_step)
-        long_pfills, short_pfills = get_position_fills(long_psize, 0.0, self.fills)
-        long_pprice = calc_long_pprice(long_psize, long_pfills) if long_psize else 0.0
-        if long_psize * long_pprice < self.min_cost:
-            long_psize, long_pprice, long_pfills = 0.0, 0.0, []
+        psize_long = round_dn(balance[self.coin]["onhand"], self.qty_step)
+        long_pfills, short_pfills = get_position_fills(psize_long, 0.0, self.fills)
+        pprice_long = calc_pprice_long(psize_long, long_pfills) if psize_long else 0.0
+        if psize_long * pprice_long < self.min_cost:
+            psize_long, pprice_long, long_pfills = 0.0, 0.0, []
         position = {
             "long": {
-                "size": long_psize,
-                "price": long_pprice,
+                "size": psize_long,
+                "price": pprice_long,
                 "liquidation_price": 0.0,
             },
             "short": {"size": 0.0, "price": 0.0, "liquidation_price": 0.0},
             "wallet_balance": balance[self.quot]["onhand"]
-            + balance[self.coin]["onhand"] * long_pprice,
+            + balance[self.coin]["onhand"] * pprice_long,
         }
         return position
 
@@ -349,7 +349,7 @@ class BinanceBotSpot(Bot):
                     {
                         "symbol": fill["symbol"],
                         "income_type": "realized_pnl",
-                        "income": calc_long_pnl(pprice, fill["price"], fill["qty"], False, 1.0),
+                        "income": calc_pnl_long(pprice, fill["price"], fill["qty"], False, 1.0),
                         "token": self.quot,
                         "timestamp": fill["timestamp"],
                         "info": 0,

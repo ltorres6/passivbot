@@ -14,37 +14,20 @@ from pure_funcs import (
     numpyize,
     candidate_to_live_config,
     ts_to_date,
+    ts_to_date_utc,
     get_dummy_settings,
     config_pretty_str,
     date_to_ts,
     get_template_live_config,
     sort_dict_keys,
+    make_compatible,
 )
 
 
 def load_live_config(live_config_path: str) -> dict:
     try:
         live_config = json.load(open(live_config_path))
-        for src, dst in [
-            ("secondary_grid_spacing", "secondary_pprice_diff"),
-            ("shrt", "short"),
-            ("secondary_pbr_allocation", "secondary_allocation"),
-            ("pbr_limit", "wallet_exposure_limit"),
-        ]:
-            live_config = json.loads(json.dumps(live_config).replace(src, dst))
-        for side in ["long", "short"]:
-            if "initial_eprice_ema_dist" not in live_config[side]:
-                live_config[side]["initial_eprice_ema_dist"] = -1000.0
-            if "ema_span_min" not in live_config[side]:
-                live_config[side]["ema_span_min"] = 1
-            if "ema_span_max" not in live_config[side]:
-                live_config[side]["ema_span_max"] = 1
-            if "auto_unstuck_wallet_exposure_threshold" not in live_config[side]:
-                live_config[side]["auto_unstuck_wallet_exposure_threshold"] = 0.0
-            if "auto_unstuck_ema_dist" not in live_config[side]:
-                live_config[side]["auto_unstuck_ema_dist"] = 0.0
-        assert all(k in live_config["long"] for k in get_template_live_config()["long"])
-        return sort_dict_keys(numpyize(live_config))
+        return sort_dict_keys(numpyize(make_compatible(live_config)))
     except Exception as e:
         raise Exception(f"failed to load live config {live_config_path} {e}")
 
@@ -86,6 +69,7 @@ async def prepare_backtest_config(args) -> dict:
         "starting_balance",
         "market_type",
         "base_dir",
+        "ohlcv",
     ]:
         if hasattr(args, key) and getattr(args, key) is not None:
             config[key] = getattr(args, key)
@@ -95,6 +79,8 @@ async def prepare_backtest_config(args) -> dict:
         config["spot"] = False
     else:
         config["spot"] = args.market_type == "spot"
+    config["start_date"] = ts_to_date_utc(date_to_ts(config["start_date"]))[:10]
+    config["end_date"] = ts_to_date_utc(date_to_ts(config["end_date"]))[:10]
     config["exchange"], _, _ = load_exchange_key_secret(config["user"])
     config["session_name"] = (
         f"{config['start_date'].replace(' ', '').replace(':', '').replace('.', '')}_"
@@ -287,7 +273,8 @@ def add_argparse_args(parser):
         required=False,
         dest="symbol",
         default=None,
-        help="specify symbol, overriding symbol from backtest config",
+        help="specify symbol(s), overriding symbol from backtest config.  "
+        + "multiple symbols separated with comma",
     )
     parser.add_argument(
         "-u",
@@ -317,7 +304,9 @@ def add_argparse_args(parser):
         help="specify end date, overriding value from backtest config",
     )
     parser.add_argument(
+        "-sb",
         "--starting_balance",
+        "--starting-balance",
         type=float,
         required=False,
         dest="starting_balance",
@@ -339,7 +328,7 @@ def add_argparse_args(parser):
         type=str,
         required=False,
         dest="base_dir",
-        default="backtests",
+        default=None,
         help="specify the base output directory for the results",
     )
 
