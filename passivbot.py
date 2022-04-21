@@ -118,8 +118,6 @@ class Bot:
             config["long_mode"] = None
         if "short_mode" not in config:
             config["short_mode"] = None
-        if "last_price_diff_limit" not in config:
-            config["last_price_diff_limit"] = 0.3
         if "assigned_balance" not in config:
             config["assigned_balance"] = None
         if "cross_wallet_pct" not in config:
@@ -158,7 +156,9 @@ class Bot:
     def dump_log(self, data) -> None:
         if self.config["logging_level"] > 0:
             with open(self.log_filepath, "a") as f:
-                f.write(json.dumps({**{"log_timestamp": time()}, **data}) + "\n")
+                f.write(
+                    json.dumps({**{"log_timestamp": time(), "symbol": self.symbol}, **data}) + "\n"
+                )
 
     async def init_emas(self) -> None:
         ohlcvs1m = await self.fetch_ohlcvs(interval="1m")
@@ -660,12 +660,16 @@ class Bot:
             return
         self.ts_locked["cancel_and_create"] = time()
         try:
-            ideal_orders = [
-                o
-                for o in self.calc_orders()
-                if not any(k in o["custom_id"] for k in ["ientry", "unstuck"])
-                or abs(o["price"] - self.price) / self.price < 0.01
-            ]
+            ideal_orders = []
+            for o in self.calc_orders():
+                if any(x in o["custom_id"] for x in ["ientry", "unstuck"]):
+                    if calc_diff(o["price"], self.price) < 0.01:
+                        # EMA based orders must be closer than 1% of current price
+                        ideal_orders.append(o)
+                else:
+                    if calc_diff(o["price"], self.price) < self.price_distance_threshold:
+                        # all orders must be closer than x% of current price
+                        ideal_orders.append(o)
             to_cancel_, to_create_ = filter_orders(
                 self.open_orders,
                 ideal_orders,
@@ -746,9 +750,15 @@ class Bot:
             logging.info(f"heartbeat {self.symbol}")
             self.log_position_long()
             self.log_position_short()
+            liq_price = self.position["long"]["liquidation_price"]
+            if calc_diff(self.position["short"]["liquidation_price"], self.price) < calc_diff(
+                liq_price, self.price
+            ):
+                liq_price = self.position["short"]["liquidation_price"]
             logging.info(
                 f'balance: {round_dynamic(self.position["wallet_balance"], 6)}'
                 + f' equity: {round_dynamic(self.position["equity"], 6)} last price: {self.price}'
+                + f" liq: {round_(liq_price, self.price_step)}"
             )
             self.heartbeat_ts = time()
         await self.cancel_and_create()
@@ -819,9 +829,15 @@ class Bot:
             if "wallet_balance" in event:
                 new_wallet_balance = self.adjust_wallet_balance(event["wallet_balance"])
                 if new_wallet_balance != self.position["wallet_balance"]:
+                    liq_price = self.position["long"]["liquidation_price"]
+                    if calc_diff(self.position["short"]["liquidation_price"], self.price) < calc_diff(
+                        liq_price, self.price
+                    ):
+                        liq_price = self.position["short"]["liquidation_price"]
                     logging.info(
                         f"balance: {round_dynamic(new_wallet_balance, 6)}"
                         + f' equity: {round_dynamic(self.position["equity"], 6)} last price: {self.price}'
+                        + f" liq: {round_(liq_price, self.price_step)}"
                     )
                 self.position["wallet_balance"] = new_wallet_balance
                 pos_change = True
@@ -1039,10 +1055,30 @@ async def main() -> None:
         default=None,
         help="add assigned_balance to live config",
     )
+    parser.add_argument(
+        "-pt",
+        "--price-distance-threshold",
+        "--price_distance_threshold",
+        type=float,
+        required=False,
+        dest="price_distance_threshold",
+        default=0.5,
+        help="only create limit orders closer to price than threshold; default=0.5",
+    )
+    parser.add_argument(
+        "-ak",
+        "--api-keys",
+        "--api_keys",
+        type=open,
+        required=False,
+        dest="api_keys",
+        default="api-keys.json",
+        help="File containing users/accounts and api-keys for each exchanges",
+    )
 
     args = parser.parse_args()
     try:
-        accounts = json.load(open("api-keys.json"))
+        accounts = json.load(args.api_keys)
     except Exception as e:
         logging.error(f"{e} failed to load api-keys.json file")
         return
@@ -1061,6 +1097,7 @@ async def main() -> None:
     config["symbol"] = args.symbol
     config["market_type"] = args.market_type if args.market_type is not None else "futures"
     config["passivbot_mode"] = determine_passivbot_mode(config)
+    config["price_distance_threshold"] = args.price_distance_threshold
     if args.assigned_balance is not None:
         logging.info(f"assigned balance set to {args.assigned_balance}")
         config["assigned_balance"] = args.assigned_balance
